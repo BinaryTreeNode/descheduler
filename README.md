@@ -3,6 +3,10 @@
 
 # Descheduler for Kubernetes
 
+## notice
+
+This branch only support RemoveDuplicatePods strategy
+
 ## Introduction
 
 Scheduling in Kubernetes is the process of binding pending pods to nodes, and is performed by
