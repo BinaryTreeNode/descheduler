@@ -62,6 +62,9 @@ func LowNodeUtilization(ds *options.DeschedulerServer, strategy api.DeschedulerS
 
 	npm := createNodePodsMap(ds.Client, nodes)
 	lowNodes, targetNodes := classifyNodes(npm, thresholds, targetThresholds, ds.EvictLocalStoragePods)
+	for _,node := range targetNodes{
+		glog.Warningf("targetNodes: %s ",node.node.Name )
+	}
 
 	glog.V(1).Infof("Criteria for a node under utilization: CPU: %v, Mem: %v, Pods: %v",
 		thresholds[v1.ResourceCPU], thresholds[v1.ResourceMemory], thresholds[v1.ResourcePods])
@@ -135,6 +138,7 @@ func classifyNodes(npm NodePodsMap, thresholds api.ResourceThresholds, targetThr
 	lowNodes, targetNodes := []NodeUsageMap{}, []NodeUsageMap{}
 	for node, pods := range npm {
 		usage, allPods, nonRemovablePods, bePods, bPods, gPods := NodeUtilization(node, pods, evictLocalStoragePods)
+
 		nuMap := NodeUsageMap{node, usage, allPods, nonRemovablePods, bePods, bPods, gPods}
 
 		// Check if node is underutilized and if we can schedule pods on it.
@@ -146,8 +150,15 @@ func classifyNodes(npm NodePodsMap, thresholds api.ResourceThresholds, targetThr
 			}
 		} else if IsNodeAboveTargetPods(usage, targetThresholds) {
 			glog.V(2).Infof("Node %#v is over utilized with usage: %#v", node.Name, usage)
+
 			if node.Labels["datatype"] == "share"{
-				targetNodes = append(targetNodes, nuMap)
+				//会出现节点负载满足但没有searcher，merger的情况，因为统计pod时会将所有pod都统计在内
+				if len(nuMap.bPods) == 0 && len(nuMap.bePods) == 0 && len(nuMap.gPods) == 0 {
+					continue
+				}else {
+					targetNodes = append(targetNodes, nuMap)
+				}
+
 			}
 		} else {
 			glog.V(2).Infof("Node %#v is appropriately utilized with usage: %#v", node.Name, usage)
@@ -193,6 +204,7 @@ func evictPodsFromTargetNodes(client clientset.Interface, evictionPolicyGroupVer
 	glog.V(1).Infof("********Number of pods evicted from each node:***********")
 
 	for _, node := range targetNodes {
+
 		nodeCapacity := node.node.Status.Capacity
 		if len(node.node.Status.Allocatable) > 0 {
 			nodeCapacity = node.node.Status.Allocatable
@@ -205,7 +217,7 @@ func evictPodsFromTargetNodes(client clientset.Interface, evictionPolicyGroupVer
 			glog.V(1).Infof("All pods have priority associated with them. Evicting pods based on priority")
 			evictablePods := make([]*v1.Pod, 0)
 			evictablePods = append(append(node.bPods, node.bePods...), node.gPods...)
-
+			glog.Warningf("im here here1")
 			// sort the evictable Pods based on priority. This also sorts them based on QoS. If there are multiple pods with same priority, they are sorted based on QoS tiers.
 			sortPodsBasedOnPriority(evictablePods)
 			evictPods(evictablePods, client, evictionPolicyGroupVersion, targetThresholds, nodeCapacity, node.usage, &totalPods, &totalCpu, &totalMem, &currentPodsEvicted, dryRun, maxPodsToEvict)
@@ -427,7 +439,6 @@ func NodeUtilization(node *v1.Node, pods []*v1.Pod, evictLocalStoragePods bool) 
 				gPods = append(gPods, pod)
 			}
 		}
-
 		req, _ := helper.PodRequestsAndLimits(pod)
 		for name, quantity := range req {
 			if name == v1.ResourceCPU || name == v1.ResourceMemory {
