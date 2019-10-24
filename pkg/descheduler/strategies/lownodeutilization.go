@@ -138,12 +138,17 @@ func classifyNodes(npm NodePodsMap, thresholds api.ResourceThresholds, targetThr
 		nuMap := NodeUsageMap{node, usage, allPods, nonRemovablePods, bePods, bPods, gPods}
 
 		// Check if node is underutilized and if we can schedule pods on it.
-		if !nodeutil.IsNodeUschedulable(node) && IsNodeWithLowUtilization(usage, thresholds) {
+		if !nodeutil.IsNodeUschedulable(node) && IsNodeWithLowPods(usage, thresholds) {
 			glog.V(2).Infof("Node %#v is under utilized with usage: %#v", node.Name, usage)
-			lowNodes = append(lowNodes, nuMap)
-		} else if IsNodeAboveTargetUtilization(usage, targetThresholds) {
+			//share means the pod in the node can be evict
+			if node.Labels["datatype"] == "share"{
+				lowNodes = append(lowNodes, nuMap)
+			}
+		} else if IsNodeAboveTargetPods(usage, targetThresholds) {
 			glog.V(2).Infof("Node %#v is over utilized with usage: %#v", node.Name, usage)
-			targetNodes = append(targetNodes, nuMap)
+			if node.Labels["datatype"] == "share"{
+				targetNodes = append(targetNodes, nuMap)
+			}
 		} else {
 			glog.V(2).Infof("Node %#v is appropriately utilized with usage: %#v", node.Name, usage)
 		}
@@ -158,7 +163,7 @@ func classifyNodes(npm NodePodsMap, thresholds api.ResourceThresholds, targetThr
 func evictPodsFromTargetNodes(client clientset.Interface, evictionPolicyGroupVersion string, targetNodes, lowNodes []NodeUsageMap, targetThresholds api.ResourceThresholds, dryRun bool, maxPodsToEvict int, nodepodCount nodePodEvictedCount) int {
 	podsEvicted := 0
 
-	SortNodesByUsage(targetNodes)
+	SortNodesByOneUsage(targetNodes,v1.ResourcePods)
 
 	// upper bound on total number of pods/cpu/memory to be moved
 	var totalPods, totalCpu, totalMem float64
@@ -234,7 +239,7 @@ func evictPods(inputPods []*v1.Pod,
 	totalMem *float64,
 	podsEvicted *int,
 	dryRun bool, maxPodsToEvict int) {
-	if IsNodeAboveTargetUtilization(nodeUsage, targetThresholds) && (*totalPods > 0 || *totalCpu > 0 || *totalMem > 0) {
+	if IsNodeAboveTargetPods(nodeUsage, targetThresholds) && (*totalPods > 0 || *totalCpu > 0 || *totalMem > 0) {
 		onePodPercentage := api.Percentage((float64(1) * 100) / float64(nodeCapacity.Pods().Value()))
 		for _, pod := range inputPods {
 			if maxPodsToEvict > 0 && *podsEvicted+1 > maxPodsToEvict {
@@ -288,6 +293,23 @@ func SortNodesByUsage(nodes []NodeUsageMap) {
 	})
 }
 
+func SortNodesByOneUsage(nodes []NodeUsageMap,resourcename v1.ResourceName) {
+	sort.Slice(nodes, func(i, j int) bool {
+		var ti, tj api.Percentage
+		for name, value := range nodes[i].usage {
+			if name == resourcename {
+				ti += value
+			}
+		}
+		for name, value := range nodes[j].usage {
+			if name == resourcename {
+				tj += value
+			}
+		}
+		// To return sorted in descending order
+		return ti > tj
+	})
+}
 // sortPodsBasedOnPriority sorts pods based on priority and if their priorities are equal, they are sorted based on QoS tiers.
 func sortPodsBasedOnPriority(evictablePods []*v1.Pod) {
 	sort.Slice(evictablePods, func(i, j int) bool {
@@ -337,6 +359,19 @@ func IsNodeAboveTargetUtilization(nodeThresholds api.ResourceThresholds, thresho
 	return false
 }
 
+func IsNodeAboveTargetPods(nodeThresholds api.ResourceThresholds, thresholds api.ResourceThresholds) bool {
+	for name, nodeValue := range nodeThresholds {
+		if name == v1.ResourcePods {
+			if value, ok := thresholds[name]; !ok {
+				continue
+			} else if nodeValue > value {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func IsNodeWithLowUtilization(nodeThresholds api.ResourceThresholds, thresholds api.ResourceThresholds) bool {
 	for name, nodeValue := range nodeThresholds {
 		if name == v1.ResourceCPU || name == v1.ResourceMemory || name == v1.ResourcePods {
@@ -349,6 +384,20 @@ func IsNodeWithLowUtilization(nodeThresholds api.ResourceThresholds, thresholds 
 	}
 	return true
 }
+
+func IsNodeWithLowPods(nodeThresholds api.ResourceThresholds, thresholds api.ResourceThresholds) bool {
+	for name, nodeValue := range nodeThresholds {
+		if name == v1.ResourcePods {
+			if value, ok := thresholds[name]; !ok {
+				continue
+			} else if nodeValue > value {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 
 // Nodeutilization returns the current usage of node.
 func NodeUtilization(node *v1.Node, pods []*v1.Pod, evictLocalStoragePods bool) (api.ResourceThresholds, []*v1.Pod, []*v1.Pod, []*v1.Pod, []*v1.Pod, []*v1.Pod) {
@@ -365,12 +414,18 @@ func NodeUtilization(node *v1.Node, pods []*v1.Pod, evictLocalStoragePods bool) 
 				continue
 			}
 		} else if podutil.IsBestEffortPod(pod) {
-			bePods = append(bePods, pod)
+			if pod.Labels["role"] == "merger" || pod.Labels["role"] == "searcher"{
+				bePods = append(bePods, pod)
+			}
 			continue
 		} else if podutil.IsBurstablePod(pod) {
-			bPods = append(bPods, pod)
+			if pod.Labels["role"] == "merger" || pod.Labels["role"] == "searcher"{
+				bPods = append(bPods, pod)
+			}
 		} else {
-			gPods = append(gPods, pod)
+			if pod.Labels["role"] == "merger" || pod.Labels["role"] == "searcher"{
+				gPods = append(gPods, pod)
+			}
 		}
 
 		req, _ := helper.PodRequestsAndLimits(pod)
