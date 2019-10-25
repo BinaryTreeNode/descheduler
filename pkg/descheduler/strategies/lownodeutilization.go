@@ -65,7 +65,9 @@ func LowNodeUtilization(ds *options.DeschedulerServer, strategy api.DeschedulerS
 	for _,node := range targetNodes{
 		glog.Warningf("targetNodes: %s ",node.node.Name )
 	}
-
+	for _,node1 := range lowNodes{
+		glog.Warningf("lowNodes: %s ",node1.node.Name )
+	}
 	glog.V(1).Infof("Criteria for a node under utilization: CPU: %v, Mem: %v, Pods: %v",
 		thresholds[v1.ResourceCPU], thresholds[v1.ResourceMemory], thresholds[v1.ResourcePods])
 
