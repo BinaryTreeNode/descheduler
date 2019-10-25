@@ -238,6 +238,8 @@ func evictPodsFromTargetNodes(client clientset.Interface, evictionPolicyGroupVer
 		nodepodCount[node.node] = currentPodsEvicted
 		podsEvicted = podsEvicted + nodepodCount[node.node]
 		glog.V(1).Infof("%v pods evicted from node %#v with usage %v", nodepodCount[node.node], node.node.Name, node.usage)
+		//只取第一个
+		break;
 	}
 	return podsEvicted
 }
