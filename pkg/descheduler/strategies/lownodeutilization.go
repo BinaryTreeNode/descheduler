@@ -219,7 +219,6 @@ func evictPodsFromTargetNodes(client clientset.Interface, evictionPolicyGroupVer
 			glog.V(1).Infof("All pods have priority associated with them. Evicting pods based on priority")
 			evictablePods := make([]*v1.Pod, 0)
 			evictablePods = append(append(node.bPods, node.bePods...), node.gPods...)
-			glog.Warningf("im here here1")
 			// sort the evictable Pods based on priority. This also sorts them based on QoS. If there are multiple pods with same priority, they are sorted based on QoS tiers.
 			sortPodsBasedOnPriority(evictablePods)
 			evictPods(evictablePods, client, evictionPolicyGroupVersion, targetThresholds, nodeCapacity, node.usage, &totalPods, &totalCpu, &totalMem, &currentPodsEvicted, dryRun, maxPodsToEvict)
