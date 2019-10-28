@@ -138,11 +138,20 @@ func validateTargetThresholds(targetThresholds api.ResourceThresholds) bool {
 // low and high thresholds, it is simply ignored.
 func classifyNodes(npm NodePodsMap, thresholds api.ResourceThresholds, targetThresholds api.ResourceThresholds, evictLocalStoragePods bool) ([]NodeUsageMap, []NodeUsageMap) {
 	lowNodes, targetNodes := []NodeUsageMap{}, []NodeUsageMap{}
+	runningFlag := false
 	for node, pods := range npm {
 		usage, allPods, nonRemovablePods, bePods, bPods, gPods := NodeUtilization(node, pods, evictLocalStoragePods)
 
 		nuMap := NodeUsageMap{node, usage, allPods, nonRemovablePods, bePods, bPods, gPods}
-
+		for _,pod :=range pods {
+			if pod.Status.Phase != "Running"{
+				runningFlag = true
+			}
+		}
+		if runningFlag == true{
+			glog.Warningf("there is(are) pod(s) in %s which is(are) not running", node.Name)
+			break
+		}
 		// Check if node is underutilized and if we can schedule pods on it.
 		if !nodeutil.IsNodeUschedulable(node) && IsNodeWithLowPods(usage, thresholds) {
 			glog.V(2).Infof("Node %#v is under utilized with usage: %#v", node.Name, usage)
@@ -423,6 +432,7 @@ func NodeUtilization(node *v1.Node, pods []*v1.Pod, evictLocalStoragePods bool) 
 	totalReqs := map[v1.ResourceName]resource.Quantity{}
 	for _, pod := range pods {
 		// We need to compute the usage of nonRemovablePods unless it is a best effort pod. So, cannot use podutil.ListEvictablePodsOnNode
+
 		if !podutil.IsEvictable(pod, evictLocalStoragePods) {
 			nonRemovablePods = append(nonRemovablePods, pod)
 			if podutil.IsBestEffortPod(pod) {
